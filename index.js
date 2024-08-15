@@ -3,9 +3,41 @@ const express = require("express");
 
 const PORT = 3000;
 
+const messages = [];
 const app = express();
 
-const tools = [
+app.get("/", async (req, res) => {
+  messages.push({ role: "user", content: req.query.content });
+
+  const response = await chat(messages);
+  const { content, role, tool_calls } = response.message;
+
+  if (!tool_calls) {
+    messages.push({ role, content });
+    res.json({ content });
+    return;
+  }
+
+  const calls = await Promise.all(
+    tool_calls.map(async (call) => {
+      const fn = tools[call.function.name];
+      if (!fn) return null;
+      return fn(call.function.arguments);
+    })
+  );
+
+  messages.push({ role: "tool", content: calls.toString() });
+
+  const r = await chat(messages);
+  res.json(r);
+});
+
+const get_current_weather = async ({ city }) => {
+  if (!city) return null;
+  return "rain";
+};
+const tools = { get_current_weather };
+const tools_declaration = [
   {
     type: "function",
     function: {
@@ -25,17 +57,14 @@ const tools = [
   },
 ];
 
-app.get("/", async (req, res) => {
-  const response = await ollama.chat({
-    tools,
-
-    messages: [{ role: "user", content: req.query.content }],
-    model: "llama3.1",
+const chat = async (messages) => {
+  return ollama.chat({
+    messages,
     stream: false,
+    model: "llama3.1",
+    tools: tools_declaration,
   });
-
-  res.json(response);
-});
+};
 
 app.listen(PORT, () => {
   console.log(`Server is running on port: ${PORT}`);
